@@ -332,7 +332,7 @@ class DocumentManager:
                         setattr(self.document_processor.config, key, value)
                 
                 # Reinitialize text splitter with new config
-                from langchain.text_splitter import RecursiveCharacterTextSplitter
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
                 self.document_processor.text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=self.document_processor.config.chunk_size,
                     chunk_overlap=self.document_processor.config.chunk_overlap,

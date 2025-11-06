@@ -494,7 +494,7 @@ def process_uploaded_files(uploaded_files, chunk_size, chunk_overlap, extract_ta
         st.session_state.document_processor.config.extract_tables = extract_tables
         
         # Reinitialize text splitter with new config
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
         st.session_state.document_processor.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,

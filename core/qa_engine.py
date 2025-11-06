@@ -43,18 +43,16 @@ from datetime import datetime
 import json
 
 # LangChain imports
-from langchain.chains import RetrievalQA, ConversationalRetrievalChain
-from langchain.chains.question_answering import load_qa_chain
-from langchain.chains.conversational_retrieval.prompts import CONDENSE_QUESTION_PROMPT
-from langchain.prompts import PromptTemplate
-from langchain.schema import Document
-from langchain.memory import ConversationBufferWindowMemory
-from langchain.callbacks.base import BaseCallbackHandler
+from langchain_core.prompts import PromptTemplate
+from langchain_core.documents import Document
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
+from langchain_core.output_parsers import StrOutputParser
 
 # LLM imports
-from langchain.llms.base import LLM
-from langchain.chat_models import ChatOpenAI
-from langchain.llms import HuggingFacePipeline
+from langchain_core.language_models import BaseLLM
+from langchain_openai import ChatOpenAI
+from langchain_huggingface import HuggingFacePipeline
 
 # Local imports
 from core.vector_store import ChromaDBManager
@@ -87,7 +85,7 @@ class LLMFactory:
     """Factory for creating different types of LLMs."""
     
     @staticmethod
-    def create_llm(llm_config: Optional[Dict[str, Any]] = None) -> LLM:
+    def create_llm(llm_config: Optional[Dict[str, Any]] = None) -> BaseLLM:
         """Create an LLM instance based on configuration."""
         llm_config = llm_config or config.llm.__dict__
         provider = llm_config.get('provider', 'openai')

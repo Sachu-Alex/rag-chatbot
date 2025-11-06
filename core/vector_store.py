@@ -42,10 +42,10 @@ from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 
 # LangChain imports
-from langchain.schema import Document
-from langchain.vectorstores import Chroma
-from langchain.embeddings.base import Embeddings
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_core.documents import Document
+from langchain_chroma import Chroma
+from langchain_core.embeddings import Embeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # Configuration
 from config import config

@@ -37,8 +37,8 @@ from pptx import Presentation
 import pandas as pd
 
 # LangChain imports
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Configuration
 from config import config
