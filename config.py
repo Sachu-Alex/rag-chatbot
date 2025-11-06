@@ -366,11 +366,11 @@ def setup_environment():
 def get_prompt_templates():
     """Get prompt templates for different use cases."""
     return {
-        "qa_prompt": """Answer this question based on the given information:
-
-Information: {context}
+        "qa_prompt": """Context: {context}
 
 Question: {question}
+
+Answer the question based only on the provided context. If the answer is not in the context, say "I don't have enough information to answer this question."
 
 Answer:""",
         

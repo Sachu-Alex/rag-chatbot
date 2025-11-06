@@ -139,20 +139,22 @@ class LLMFactory:
                 "text2text-generation",
                 model=model_name,
                 device=device_id,
-                max_length=200,  # T5 uses max_length instead of max_new_tokens
-                do_sample=True,
-                temperature=llm_config.get('temperature', 0.7),
-                truncation=True      # Enable truncation
+                max_length=500,      # Increased for better answers
+                do_sample=False,     # Disable sampling for more consistent output
+                temperature=0.1,     # Low temperature for factual answers
+                truncation=True,
+                repetition_penalty=1.2  # Reduce repetition
             )
             
             logger.info("Hugging Face LLM created successfully")
             return HuggingFacePipeline(
                 pipeline=pipe,
                 model_kwargs={
-                    "max_length": 200,
-                    "do_sample": True,
-                    "temperature": 0.7,
-                    "truncation": True
+                    "max_length": 500,
+                    "do_sample": False,      # Deterministic output
+                    "temperature": 0.1,      # Low temperature
+                    "truncation": True,
+                    "repetition_penalty": 1.2
                 }
             )
             
@@ -196,13 +198,9 @@ class DocumentQAEngine:
         # Load prompt templates
         self.prompts = get_prompt_templates()
         
-        # Initialize memory for conversational Q&A
-        self.memory = ConversationBufferWindowMemory(
-            k=5,  # Remember last 5 exchanges
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer"
-        )
+        # Initialize simple conversation memory (replaces LangChain memory)
+        self.conversation_history = []  # List of (question, answer) tuples
+        self.max_history_length = 5    # Remember last 5 exchanges
         
         # Callback handler
         self.callback_handler = QACallbackHandler()
@@ -215,7 +213,7 @@ class DocumentQAEngine:
         
         # Test LLM functionality
         try:
-            test_response = self.llm("Hello, please respond with 'Working'")
+            test_response = self.llm.invoke("Hello, please respond with 'Working'")
             logger.info(f"LLM test successful: {repr(test_response)}")
         except Exception as e:
             logger.error(f"LLM test failed: {e}")
@@ -249,25 +247,91 @@ class DocumentQAEngine:
             lambda_mult=self.retrieval_config.get('lambda_mult', 0.5)
         )
         
-        # Basic RetrievalQA chain with truncated prompt
-        self.qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=self.retriever,
-            chain_type_kwargs={"prompt": qa_prompt},
-            return_source_documents=True,
-            callbacks=[self.callback_handler]
+        # Modern RAG chain using LangChain Expression Language (LCEL)
+        self.qa_chain = self._create_rag_chain(qa_prompt)
+        
+        # Note: Conversational functionality is now handled through conversation_history
+    
+    def _create_rag_chain(self, prompt_template):
+        """
+        Create a modern RAG chain using LangChain Expression Language (LCEL).
+        
+        This replaces the deprecated RetrievalQA chain with a modern implementation
+        that uses the Runnable interface for better control and flexibility.
+        """
+        def format_docs(docs):
+            """Format retrieved documents for the prompt."""
+            return "\n\n".join(doc.page_content for doc in docs)
+        
+        # Create the RAG chain using LCEL
+        rag_chain = (
+            {
+                "context": self.retriever | format_docs,
+                "question": RunnablePassthrough()
+            }
+            | prompt_template
+            | self.llm
+            | StrOutputParser()
         )
         
-        # Conversational RetrievalQA chain
-        self.conversational_qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=self.llm,
-            retriever=self.retriever,
-            memory=self.memory,
-            condense_question_prompt=condense_prompt,
-            return_source_documents=True,
-            callbacks=[self.callback_handler]
-        )
+        return rag_chain
+    
+    def _clean_answer(self, raw_answer: str) -> str:
+        """
+        Clean and validate generated answer to prevent garbled output.
+        
+        This method detects and fixes common issues with LLM outputs:
+        - Repetitive text patterns
+        - Excessive special characters
+        - Truncated or incomplete sentences
+        - Overly long responses
+        """
+        if not raw_answer or not isinstance(raw_answer, str):
+            return "I couldn't generate a proper answer. Please try rephrasing your question."
+        
+        # Remove excessive whitespace and normalize
+        answer = " ".join(raw_answer.strip().split())
+        
+        # Check for repetitive patterns (common in garbled output)
+        words = answer.split()
+        if len(words) > 10:
+            # Check for excessive repetition of short words/patterns
+            word_counts = {}
+            for word in words:
+                word_counts[word] = word_counts.get(word, 0) + 1
+            
+            # If any single word appears more than 30% of the time, it's likely garbled
+            max_count = max(word_counts.values())
+            if max_count > len(words) * 0.3:
+                return "I encountered an issue generating the answer. Please try asking the question differently."
+        
+        # Check for excessive punctuation or special characters
+        special_char_ratio = sum(1 for c in answer if not c.isalnum() and c != ' ') / len(answer) if answer else 0
+        if special_char_ratio > 0.4:
+            return "I encountered an issue with text generation. Please try rephrasing your question."
+        
+        # Limit length to prevent overly long responses
+        if len(answer) > 1000:
+            # Find the last complete sentence within reasonable length
+            sentences = answer.split('. ')
+            result = ""
+            for sentence in sentences:
+                if len(result + sentence) < 800:
+                    result += sentence + ". "
+                else:
+                    break
+            answer = result.strip()
+        
+        # Ensure the answer ends properly
+        if answer and not answer.endswith(('.', '!', '?')):
+            # Find the last complete sentence
+            last_period = answer.rfind('.')
+            if last_period > len(answer) * 0.5:  # If we have at least half the text as complete sentences
+                answer = answer[:last_period + 1]
+            else:
+                answer += "."
+        
+        return answer if answer else "I don't have enough information to answer this question."
     
     def ask_question(self, 
                     question: str, 
@@ -294,7 +358,7 @@ class DocumentQAEngine:
                 self._update_retrieval_strategy(retrieval_strategy, **kwargs)
             
             # Get relevant documents first and truncate them
-            docs = self.retriever.get_relevant_documents(question)
+            docs = self.retriever.invoke(question)
             logger.info(f"Retrieved {len(docs)} documents from vector store")
             
             if not docs:
@@ -311,7 +375,7 @@ class DocumentQAEngine:
             for i, doc in enumerate(docs):
                 logger.info(f"Document {i}: {len(doc.page_content)} chars, metadata: {doc.metadata}")
                 # Create a copy to avoid modifying original
-                truncated_content = self._truncate_context(doc.page_content, max_tokens=150)
+                truncated_content = self._truncate_context(doc.page_content, max_tokens=300)
                 logger.info(f"Truncated document {i}: {len(truncated_content)} chars")
                 truncated_doc = Document(
                     page_content=truncated_content,
@@ -321,34 +385,38 @@ class DocumentQAEngine:
             
             logger.info(f"All documents processed and truncated")
             
-            # Choose chain based on conversation preference
-            chain = self.conversational_qa_chain if use_conversation else self.qa_chain
+            # Add conversation context if needed
+            if use_conversation and self.conversation_history:
+                # Include previous conversation in the question context
+                conv_context = "\n".join([
+                    f"Previous Q: {q}\nPrevious A: {a}" 
+                    for q, a, _ in self.conversation_history[-2:]  # Last 2 exchanges
+                ])
+                question_with_context = f"Previous conversation:\n{conv_context}\n\nCurrent question: {question}"
+            else:
+                question_with_context = question
             
-            # For now, let's use a simpler direct approach to avoid token issues
-            # Prepare context manually
-            context = "\n\n".join([doc.page_content for doc in truncated_docs])
-            
-            # Try direct LLM approach with simpler input
+            # Use the new RAG chain to generate the answer
             try:
-                logger.info(f"Context length: {len(context)} characters")
-                logger.info(f"Question: {question}")
-                logger.info(f"Context preview: {context[:200]}...")
+                logger.info(f"Question with context: {question_with_context}")
+                logger.info(f"Using modern RAG chain")
                 
-                # Check if this is a question-answering model (fallback) or text generation
-                if hasattr(self.llm, 'pipeline') and self.llm.pipeline.task == 'question-answering':
-                    # For Q&A models, use context and question directly
-                    logger.info("Using question-answering pipeline")
-                    result_dict = self.llm.pipeline(question=question, context=context)
-                    answer = result_dict.get('answer', 'No answer found')
-                    logger.info(f"Q&A model response: {repr(answer)}")
-                else:
-                    # For text generation models, use formatted prompt
-                    prompt_text = self.prompts["qa_prompt"].format(context=context, question=question)
-                    logger.info(f"Using text generation with prompt length: {len(prompt_text)}")
-                    logger.info(f"Prompt preview: {prompt_text[:200]}...")
+                # Use the new RAG chain
+                raw_answer = self.qa_chain.invoke(question_with_context)
+                logger.info(f"RAG chain response: {repr(raw_answer)}")
+                
+                # Clean and validate the answer
+                answer = self._clean_answer(raw_answer)
+                logger.info(f"Cleaned answer: {repr(answer)}")
+                
+                # Store in conversation history if using conversation mode
+                if use_conversation:
+                    timestamp = datetime.now().isoformat()
+                    self.conversation_history.append((question, answer, timestamp))
                     
-                    answer = self.llm(prompt_text)
-                    logger.info(f"Text generation response: {repr(answer)}")
+                    # Keep only the last max_history_length exchanges
+                    if len(self.conversation_history) > self.max_history_length:
+                        self.conversation_history.pop(0)
                 
                 result = {
                     "answer": answer,
@@ -484,22 +552,20 @@ class DocumentQAEngine:
     
     def clear_conversation(self):
         """Clear conversation memory."""
-        self.memory.clear()
+        self.conversation_history.clear()
         logger.info("Conversation memory cleared")
     
     def get_conversation_history(self) -> List[Dict[str, Any]]:
         """Get conversation history."""
         try:
-            messages = self.memory.chat_memory.messages
             history = []
             
-            for i in range(0, len(messages), 2):
-                if i + 1 < len(messages):
-                    history.append({
-                        "question": messages[i].content,
-                        "answer": messages[i + 1].content,
-                        "timestamp": datetime.now().isoformat()
-                    })
+            for question, answer, timestamp in self.conversation_history:
+                history.append({
+                    "question": question,
+                    "answer": answer,
+                    "timestamp": timestamp
+                })
             
             return history
             
@@ -610,7 +676,7 @@ class DocumentQAEngine:
             
             stats = {
                 "total_queries": len(self.query_history),
-                "conversation_active": len(self.memory.chat_memory.messages) > 0,
+                "conversation_active": len(self.conversation_history) > 0,
                 "retrieval_config": self.retrieval_config,
                 "vector_store_stats": vector_stats,
                 "llm_provider": config.llm.provider,
