@@ -1,0 +1,18 @@
+{
+  "created_at": "2025-09-03T14:32:07.480537",
+  "last_updated": "2025-11-05T12:25:29.210954",
+  "document_count": 4,
+  "total_chunks": 84,
+  "collections": {
+    "document_qa": {
+      "created_at": "2025-09-10T14:40:35.119182",
+      "chunk_count": 84,
+      "document_sources": [
+        "/private/var/folders/6j/_nyr8k710g34gxcwjkwcc93w0000gn/T/tmp28h9rtz7/\ud83e\udde0 ChatApp - Local LLM Chat Interface.pdf",
+        "/private/var/folders/6j/_nyr8k710g34gxcwjkwcc93w0000gn/T/tmpknmdkfn2/FineTools API Reference(2).docx.pdf",
+        "/private/var/folders/6j/_nyr8k710g34gxcwjkwcc93w0000gn/T/tmpqj55n8ai/\ud83e\udde0 Multi-Modal Assistant .pdf",
+        "/private/var/folders/6j/_nyr8k710g34gxcwjkwcc93w0000gn/T/tmp20r1eks4/Sample - PDF - 100-prompts-to-transform-your-life-STANDARD.pdf"
+      ]
+    }
+  }
+}
